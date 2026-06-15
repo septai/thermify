@@ -1,0 +1,346 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Price and temperature-driven Thermia heat pump control using AWS Lambda.
+
+Parameters:
+  ThermiaUsernameParameterPath:
+    Type: String
+    Description: SSM SecureString parameter path for Thermia username.
+  ThermiaPasswordParameterPath:
+    Type: String
+    Description: SSM SecureString parameter path for Thermia password.
+  CozifyConfigParameterPath:
+    Type: String
+    Description: SSM SecureString parameter path for Cozify configuration text.
+  PowerPriceApiUrl:
+    Type: String
+    Description: URL of the electricity price API providing quarter-hourly prices in JSON format.
+  S3BucketPrefix:
+    Type: String
+    Description: S3 bucket name prefix used to form the account-regional namespace bucket name.
+  S3PriceKey:
+    Type: String
+    Description: S3 object key containing quarter-hour electricity prices.
+  S3HeatingHistoryKey:
+    Type: String
+    Description: S3 object key containing historical heating decisions.
+  S3LegionellaBoostKey:
+    Type: String
+    Description: S3 object key containing the latest legionella boost timestamp.
+  LogLevel:
+    Type: String
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARNING
+      - ERROR
+      - CRITICAL
+  ThermiaDemoMode:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+  NominalTargetTemperature:
+    Type: Number
+  NominalIndoorTemperature:
+    Type: Number
+  MinTargetTemperature:
+    Type: Number
+  MaxTargetTemperature:
+    Type: Number
+  ReferencePrice:
+    Type: Number
+  LowTemperatureProtectionMargin:
+    Type: Number
+  PriceGain:
+    Type: Number
+  IndoorTemperatureGain:
+    Type: Number
+  LowTemperatureBoost:
+    Type: Number
+  DefaultHeatingCurve:
+    Type: Number
+  Timezone:
+    Type: String
+    Default: Europe/Helsinki
+    Description: IANA time zone used when rendering heating schedule logs.
+  ShutdownOutdoorTemperatureLimit:
+    Type: Number
+    Description: Outdoor temperature threshold used to prevent shutdown when it's too cold outside.
+  ShutdownSupplyLineTemperatureLimit:
+    Type: Number
+    Description: Supply line temperature threshold used to prevent shutdown when the heating loop is still hot.
+  SummerModeAverageTemperatureThreshold:
+    Type: Number
+    Description: Average outdoor temperature threshold over the last 24 hours used to identify summer mode.
+  SummerModeMinimumTemperatureThreshold:
+    Type: Number
+    Description: Minimum outdoor temperature threshold over the last 24 hours used to identify summer mode.
+  IdleTargetTemperature:
+    Type: Number
+    Description: Target temperature to use during idle periods when the heat pump is allowed to run but we want to minimize energy use.
+  MinRun:
+    Type: Number
+    Description: Minimum run time in 15-minute slots to avoid short cycling when the heat pump is turned on.
+  MinIdle:
+    Type: Number
+    Description: Minimum idle time in 15-minute slots to avoid short cycling when the heat pump is turned off.
+  HappyPriceBias:
+    Type: Number
+  LegionellaDisinfectionTemperature:
+    Type: Number
+    Description: The minimum hot water temperature (°C) required for successful Legionella disinfection.
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+    Tracing: Active
+
+Resources:
+  ThermiaDependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: thermia-python-dependencies
+      Description: Python dependencies for heating optimization and price ingestion Lambdas.
+      ContentUri: layers/thermia-python/
+      CompatibleRuntimes:
+        - python3.11
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.11
+
+  OptimizeHeatingDataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${S3BucketPrefix}-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  IngestSpotPricesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ingest-spot-prices
+      Handler: handler_ingestor.lambda_handler
+      CodeUri: src/
+      Description: Fetch quarter-hourly electricity prices and store in S3 for optimization use.
+      Timeout: 65
+      MemorySize: 128
+      Environment:
+        Variables:
+          POWER_PRICE_API_URL: !Ref PowerPriceApiUrl
+          S3_BUCKET: !Sub "${S3BucketPrefix}-${AWS::AccountId}-${AWS::Region}"
+          S3_PRICE_KEY: !Ref S3PriceKey
+          LOG_LEVEL: !Ref LogLevel
+      Layers:
+        - !Ref ThermiaDependenciesLayer
+      Events:
+        # First schedule - 12:38 PM daily
+        NoonSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(38 12 * * ? *)
+            ScheduleExpressionTimezone: UTC
+            Description: "Run at 12:38 PM daily"
+            State: ENABLED
+        # Second schedule - 8:38 PM daily  
+        EveningSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(38 20 * * ? *)
+            ScheduleExpressionTimezone: UTC
+            Description: "Run at 8:38 PM daily"
+            State: ENABLED
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: WriteS3PriceObject
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub arn:aws:s3:::${OptimizeHeatingDataBucket}/${S3PriceKey}
+
+  OptimizeHeatingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: optimize-heating
+      Handler: handler_optimizer.lambda_handler
+      CodeUri: src/
+      Description: Read price and indoor temperature, then set Thermia target temperature.
+      Timeout: 120
+      MemorySize: 1792
+      Environment:
+        Variables:
+          THERMIA_USERNAME_PARAMETER: !Ref ThermiaUsernameParameterPath
+          THERMIA_PASSWORD_PARAMETER: !Ref ThermiaPasswordParameterPath
+          COZIFY_CONFIG_PARAMETER: !Ref CozifyConfigParameterPath
+          S3_BUCKET: !Sub "${S3BucketPrefix}-${AWS::AccountId}-${AWS::Region}"
+          S3_PRICE_KEY: !Ref S3PriceKey
+          S3_HEATING_HISTORY_KEY: !Ref S3HeatingHistoryKey
+          S3_LEGIONELLA_BOOST_KEY: !Ref S3LegionellaBoostKey
+          LOG_LEVEL: !Ref LogLevel
+          THERMIA_DEMO_MODE: !Ref ThermiaDemoMode
+          NOMINAL_TARGET_TEMPERATURE: !Ref NominalTargetTemperature
+          NOMINAL_INDOOR_TEMPERATURE: !Ref NominalIndoorTemperature
+          MIN_TARGET_TEMPERATURE: !Ref MinTargetTemperature
+          MAX_TARGET_TEMPERATURE: !Ref MaxTargetTemperature
+          REFERENCE_PRICE: !Ref ReferencePrice
+          LOW_TEMPERATURE_PROTECTION_MARGIN: !Ref LowTemperatureProtectionMargin
+          PRICE_GAIN: !Ref PriceGain
+          INDOOR_TEMPERATURE_GAIN: !Ref IndoorTemperatureGain
+          LOW_TEMPERATURE_BOOST: !Ref LowTemperatureBoost
+          DEFAULT_HEATING_CURVE: !Ref DefaultHeatingCurve
+          TIMEZONE: !Ref Timezone
+          SHUTDOWN_OUTDOOR_TEMPERATURE_LIMIT: !Ref ShutdownOutdoorTemperatureLimit
+          SHUTDOWN_SUPPLY_LINE_TEMPERATURE_LIMIT: !Ref ShutdownSupplyLineTemperatureLimit
+          SUMMER_MODE_AVERAGE_TEMPERATURE_THRESHOLD: !Ref SummerModeAverageTemperatureThreshold
+          SUMMER_MODE_MINIMUM_TEMPERATURE_THRESHOLD: !Ref SummerModeMinimumTemperatureThreshold
+          IDLE_TARGET_TEMPERATURE: !Ref IdleTargetTemperature
+          MIN_RUN: !Ref MinRun
+          MIN_IDLE: !Ref MinIdle
+          HAPPY_PRICE_BIAS: !Ref HappyPriceBias
+          LEGIONELLA_DISINFECTION_TEMPERATURE: !Ref LegionellaDisinfectionTemperature
+      Layers:
+        - !Ref ThermiaDependenciesLayer
+      Events:
+        PriceDrivenControlSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0,15,30,45 * * * ? *)
+            ScheduleExpressionTimezone: UTC
+            Description: "Runs every 15 minutes to adjust heating"
+            State: ENABLED
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ReadThermiaUsername
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ThermiaUsernameParameterPath}
+            - Sid: ReadThermiaPassword
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ThermiaPasswordParameterPath}
+            - Sid: ReadCozifyConfig
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CozifyConfigParameterPath}
+            - Sid: UpdateCozifyConfig
+              Effect: Allow
+              Action:
+                - ssm:PutParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CozifyConfigParameterPath}
+            - Sid: ReadS3PriceObject
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub arn:aws:s3:::${OptimizeHeatingDataBucket}/${S3PriceKey}
+            - Sid: ReadWriteS3HeatingHistoryObject
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub arn:aws:s3:::${OptimizeHeatingDataBucket}/${S3HeatingHistoryKey}
+            - Sid: ReadWriteS3LegionellaBoostObject
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub arn:aws:s3:::${OptimizeHeatingDataBucket}/${S3LegionellaBoostKey}
+            - Sid: PublishFallbackMetric
+              Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: Thermia/OptimizeHeating
+            - Sid: InvokeIngestSpotPricesFunction
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt IngestSpotPricesFunction.Arn
+
+  OptimizeHeatingAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "thermia-optimize-heating-alarms-${AWS::AccountId}"
+      DisplayName: "Thermia Optimize Heating Alarms"
+      KmsMasterKeyId: alias/aws/sns
+
+  OptimizeHeatingAlarmPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref OptimizeHeatingAlarmTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudWatchAlarmsToPublish
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action:
+              - sns:Publish
+            Resource: !Ref OptimizeHeatingAlarmTopic
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref 'AWS::AccountId'
+
+
+  ApplicationErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${OptimizeHeatingFunction}-application-error"
+      AlarmDescription: >-
+        Triggers when the Lambda encounters repeated application-level failures
+        such as missing credentials or Thermia API errors.
+      Namespace: Thermia/OptimizeHeating
+      MetricName: ApplicationErrorCount
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref OptimizeHeatingFunction
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref OptimizeHeatingAlarmTopic
+
+Outputs:
+  IngestSpotPricesFunctionArn:
+    Description: ARN of the Lambda function responsible for ingesting electricity prices.
+    Value: !GetAtt IngestSpotPricesFunction.Arn
+  IngestSpotPricesFunctionName:
+    Description: Name of the Lambda function responsible for ingesting electricity prices.
+    Value: !Ref IngestSpotPricesFunction
+  OptimizeHeatingFunctionArn:
+    Description: ARN of the price-driven heating optimization Lambda function.
+    Value: !GetAtt OptimizeHeatingFunction.Arn
+  OptimizeHeatingFunctionName:
+    Description: Name of the price-driven heating optimization Lambda function.
+    Value: !Ref OptimizeHeatingFunction
+  ApplicationErrorAlarmName:
+    Description: Name of the alarm for repeated application-level errors.
+    Value: !Ref ApplicationErrorAlarm
+  CozifyUnavailableFallbackTopicArn:
+    Description: SNS topic ARN for Optimize Heating alarm notifications.
+    Value: !Ref OptimizeHeatingAlarmTopic
+

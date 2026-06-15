@@ -1,0 +1,27 @@
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "optimize-heating"
+region = "eu-west-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "optimize-heating"
+image_repositories = []
+parameter_overrides = "ThermiaUsernameParameterPath=\"/lambda/thermia/username\" ThermiaPasswordParameterPath=\"/lambda/thermia/secret\" CozifyConfigParameterPath=\"/lambda/cozify/config\" PowerPriceApiUrl=\"https://api.porssisahko.net/v2/latest-prices.json\" S3BucketPrefix=\"optimize-heating-data-bucket\" S3PriceKey=\"latest-prices.json\" S3HeatingHistoryKey=\"heating-history.json\" S3LegionellaBoostKey=\"latest-legionella-boost-time.json\" NominalIndoorTemperature=\"14.5\" NominalTargetTemperature=\"17.0\" MinTargetTemperature=\"14.0\" MaxTargetTemperature=\"20.0\" IdleTargetTemperature=\"10\" ReferencePrice=\"5.0\" LowTemperatureProtectionMargin=\"1.5\" PriceGain=\"1.2\" IndoorTemperatureGain=\"1.5\" LowTemperatureBoost=\"3.0\" DefaultHeatingCurve=\"36\" Timezone=\"Europe/Helsinki\" ShutdownOutdoorTemperatureLimit=\"-5.0\" ShutdownSupplyLineTemperatureLimit=\"27\" SummerModeAverageTemperatureThreshold=\"10.0\" SummerModeMinimumTemperatureThreshold=\"0.0\" MinRun=\"2\" MinIdle=\"2\" HappyPriceBias=\"0.0\" LegionellaDisinfectionTemperature=\"61\" LogLevel=\"INFO\" ThermiaDemoMode=\"false\""
+
+[default.local_invoke.parameters]
+parameter_overrides = "ThermiaUsernameParameterPath=\"/lambda/thermia/username\" ThermiaPasswordParameterPath=\"/lambda/thermia/secret\" CozifyConfigParameterPath=\"/lambda/cozify/config\" PowerPriceApiUrl=\"https://api.porssisahko.net/v2/latest-prices.json\" S3BucketPrefix=\"optimize-heating-data-bucket\" S3PriceKey=\"latest-prices.json\" S3HeatingHistoryKey=\"heating-history.json\" S3LegionellaBoostKey=\"latest-legionella-boost-time.json\" NominalIndoorTemperature=\"14.5\" NominalTargetTemperature=\"17.0\" MinTargetTemperature=\"14.0\" MaxTargetTemperature=\"20.0\" IdleTargetTemperature=\"10\" ReferencePrice=\"5.0\" LowTemperatureProtectionMargin=\"1.5\" PriceGain=\"1.2\" IndoorTemperatureGain=\"1.5\" LowTemperatureBoost=\"3.0\" DefaultHeatingCurve=\"36\" Timezone=\"Europe/Helsinki\" ShutdownOutdoorTemperatureLimit=\"-5.0\" ShutdownSupplyLineTemperatureLimit=\"27\" SummerModeAverageTemperatureThreshold=\"10.0\" SummerModeMinimumTemperatureThreshold=\"0.0\" MinRun=\"2\" MinIdle=\"2\" HappyPriceBias=\"0.0\" LegionellaDisinfectionTemperature=\"61\" LogLevel=\"INFO\" ThermiaDemoMode=\"true\""
+
+
+

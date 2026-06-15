@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+
+# Build and packaging
+dist/
+build/
+*.egg-info/
+
+# AWS SAM
+.aws-sam/
+
+# IDE and OS
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.DS_Store
+Thumbs.db
+
+# Local secrets and env files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# History
+.history/
+
+# Temp files
+.tmp/
+.temp/
+*.tmp
+*.temp
