@@ -93,7 +93,7 @@ Parameters:
 
 Globals:
   Function:
-    Runtime: python3.11
+    Runtime: python3.14
     Architectures:
       - x86_64
     Tracing: Active
@@ -106,10 +106,10 @@ Resources:
       Description: Python dependencies for heating optimization and price ingestion Lambdas.
       ContentUri: layers/thermia-python/
       CompatibleRuntimes:
-        - python3.11
+        - python3.14
       RetentionPolicy: Delete
     Metadata:
-      BuildMethod: python3.11
+      BuildMethod: python3.14
 
   OptimizeHeatingDataBucket:
     Type: AWS::S3::Bucket

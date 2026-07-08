@@ -3,7 +3,7 @@ name = "thermia-heating-control"
 version = "0.1.0"
 description = "AWS SAM Lambda to control Thermia heating"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = { text = "GPL-3.0-only" }
 authors = [
   { name = "Project Contributors" }

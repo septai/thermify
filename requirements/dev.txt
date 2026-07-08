@@ -1,5 +1,5 @@
 -r base.txt
-numpy>=1.26.0,<2.0.0
+numpy>=2.0.0
 plotly>=5.18.0,<6.0.0
 pytest>=8.3.2,<9.0.0
 pytest-cov>=5.0.0,<6.0.0

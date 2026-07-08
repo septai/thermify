@@ -50,7 +50,7 @@ For a full explanation of responsibilities, dependency direction, and request fl
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.14+
 - AWS SAM CLI
 - AWS credentials with permissions to deploy CloudFormation and read SSM parameters
 - Thermia account credentials stored in Parameter Store as `SecureString`
