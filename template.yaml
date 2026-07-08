@@ -279,7 +279,7 @@ Resources:
     Properties:
       TopicName: !Sub "thermia-optimize-heating-alarms-${AWS::AccountId}"
       DisplayName: "Thermia Optimize Heating Alarms"
-      KmsMasterKeyId: alias/aws/sns
+      # KmsMasterKeyId: alias/aws/sns
 
   OptimizeHeatingAlarmPolicy:
     Type: AWS::SNS::TopicPolicy
