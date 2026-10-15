@@ -18,7 +18,11 @@ from application.errors import (
 )
 from config.settings import OptimizerSettings
 from domain.datetime_utils import _parse_iso8601_utc, _parse_utc_iso8601
-from domain.how_much_to_heat import TemperatureControlConstants, compute_target_temperature
+from domain.how_much_to_heat import (
+    TemperatureControlConstants,
+    compute_target_temperature,
+    is_indoor_temperature_too_low,
+)
 from domain.interfaces import CozifyClientProtocol, S3ClientProtocol, ThermiaClientProtocol
 from domain.types import HeatingHistoryEntry, PriceEntry
 from domain.when_to_heat import WhenToHeatPlanner
@@ -247,9 +251,10 @@ class HeatingControlService:
         if indoor_temperature is None:
             is_indoor_temperature_safe = False
         else:
-            is_indoor_temperature_safe = indoor_temperature > (
-                self._settings.nominal_indoor_temperature
-                - self._settings.low_temperature_protection_margin
+            is_indoor_temperature_safe = not is_indoor_temperature_too_low(
+                indoor_temperature,
+                self._settings.nominal_indoor_temperature,
+                self._settings.low_temperature_protection_margin,
             )
 
         if outdoor_temperature is None:
@@ -293,6 +298,7 @@ class HeatingControlService:
 
     def _apply_idle_heating(
         self,
+        target_temperature: float,
         indoor_temperature: float | None,
         outdoor_temperature: float | None,
         now: datetime,
@@ -310,12 +316,19 @@ class HeatingControlService:
         if operation_mode is None:
             return
 
-        self._apply_idle_operation_mode(operation_mode)
+        self._apply_idle_operation_mode(operation_mode, target_temperature)
 
-    def _apply_idle_operation_mode(self, operation_mode: OperationMode) -> None:
+    def _apply_idle_operation_mode(
+        self,
+        operation_mode: OperationMode,
+        target_temperature: float,
+    ) -> None:
         if operation_mode in {OperationMode.AUTO, OperationMode.COMPRESSOR}:
-            self._thermia_client.set_target_temperature(self._settings.idle_target_temperature)
-            self._thermia_client.set_heating_curve(self._settings.default_heating_curve)
+            setpoint_temperature, curve_offset = self._to_thirds(target_temperature)
+            self._thermia_client.set_target_temperature(setpoint_temperature)
+            self._thermia_client.set_heating_curve(
+                self._settings.default_heating_curve + curve_offset
+            )
 
         self._thermia_client.set_operation_mode(operation_mode)
 
@@ -389,7 +402,21 @@ class HeatingControlService:
             self._apply_active_heating(target_temperature, now, prices)
             return True
 
-        self._apply_idle_heating(indoor_temperature, outdoor_temperature, now, prices)
+        idle_target_temperature = self._settings.idle_target_temperature
+        if indoor_temperature is not None and is_indoor_temperature_too_low(
+            indoor_temperature,
+            self._settings.nominal_indoor_temperature,
+            self._settings.low_temperature_protection_margin,
+        ):
+            idle_target_temperature = target_temperature
+
+        self._apply_idle_heating(
+            target_temperature=idle_target_temperature,
+            indoor_temperature=indoor_temperature,
+            outdoor_temperature=outdoor_temperature,
+            now=now,
+            prices=prices,
+        )
         return False
 
     def _is_summer(self) -> bool:

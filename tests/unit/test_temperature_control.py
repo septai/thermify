@@ -2,6 +2,7 @@ from domain.how_much_to_heat import (
     TemperatureControlConstants,
     clamp,
     compute_target_temperature,
+    is_indoor_temperature_too_low,
 )
 
 
@@ -23,6 +24,11 @@ def test_clamp_limits_value_into_range() -> None:
     assert clamp(25.0, 17.0, 21.0) == 21.0
     assert clamp(15.0, 17.0, 21.0) == 17.0
     assert clamp(19.5, 17.0, 21.0) == 19.5
+
+
+def test_indoor_temperature_protection_uses_strict_lower_bound() -> None:
+    assert is_indoor_temperature_too_low(18.0, 21.0, 2.0) is True
+    assert is_indoor_temperature_too_low(19.0, 21.0, 2.0) is False
 
 
 def test_compute_target_temperature_cheap_price_is_clamped_to_max() -> None:
@@ -48,5 +54,3 @@ def test_compute_target_temperature_enforces_storage_protection_floor() -> None:
         price=100.0, indoor_temperature=18.0, constants=_constants()
     )
     assert result == 18.0
-
-

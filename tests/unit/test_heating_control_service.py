@@ -278,6 +278,50 @@ def test_execute_uses_tnom_fallback_when_cozify_unavailable() -> None:
     assert result.fallback_reason == "cozify_unavailable"
 
 
+def test_idle_heating_uses_target_temperature_when_indoor_temperature_is_too_low() -> None:
+    thermia_client = FakeThermiaClient("user", "pass")
+    service = HeatingControlService(
+        settings=_settings(),
+        s3_client=FakeS3Client(price=2.5),
+        thermia_client=thermia_client,
+        cozify_client=FakeCozifyClient(temperature=18.0),
+    )
+
+    service._apply_heating_control(
+        is_summer=True,
+        is_heating_slot=True,
+        target_temperature=19.5,
+        now=datetime.now(UTC),
+        prices=None,
+        indoor_temperature=18.0,
+        outdoor_temperature=0.0,
+    )
+
+    assert thermia_client.last_target == service._to_thirds(19.5)[0]
+
+
+def test_idle_heating_uses_idle_target_temperature_when_indoor_temperature_is_safe() -> None:
+    thermia_client = FakeThermiaClient("user", "pass")
+    service = HeatingControlService(
+        settings=_settings(),
+        s3_client=FakeS3Client(price=2.5),
+        thermia_client=thermia_client,
+        cozify_client=FakeCozifyClient(temperature=20.0),
+    )
+
+    service._apply_heating_control(
+        is_summer=True,
+        is_heating_slot=True,
+        target_temperature=19.5,
+        now=datetime.now(UTC),
+        prices=None,
+        indoor_temperature=20.0,
+        outdoor_temperature=-10.0,
+    )
+
+    assert thermia_client.last_target == _settings().idle_target_temperature
+
+
 def test_history_replace_and_prune_behavior() -> None:
     # Prepare deterministic slot start/end matching service logic
     now = datetime.now(UTC)

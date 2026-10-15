@@ -20,6 +20,15 @@ class TemperatureControlConstants:
     low_temperature_boost: float
 
 
+def is_indoor_temperature_too_low(
+    indoor_temperature: float,
+    nominal_indoor_temperature: float,
+    low_temperature_protection_margin: float,
+) -> bool:
+    """Return whether indoor temperature requires low-temperature protection."""
+    return indoor_temperature < nominal_indoor_temperature - low_temperature_protection_margin
+
+
 def clamp(value: float, minimum: float, maximum: float) -> float:
     """Clamp a numeric value into an inclusive [minimum, maximum] range."""
     if minimum > maximum:
@@ -58,9 +67,10 @@ def compute_target_temperature(
 
     # If indoor temperature is significantly below nominal,
     # don't allow target to drop too low to protect storage
-    if (
-        indoor_temperature
-        < constants.nominal_indoor_temperature - constants.low_temperature_protection_margin
+    if is_indoor_temperature_too_low(
+        indoor_temperature,
+        constants.nominal_indoor_temperature,
+        constants.low_temperature_protection_margin,
     ):
         target_temperature = max(
             target_temperature,
