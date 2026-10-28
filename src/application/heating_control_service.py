@@ -630,6 +630,28 @@ class HeatingControlService:
             LOGGER.exception("Failed to read outdoor temperature from Thermia: %s", exc)
             return None
 
+    def _apply_heating_start_boost(
+        self,
+        history: list[HeatingHistoryEntry],
+        is_heating_slot: bool,
+        target_temperature: float,
+    ) -> float:
+        previous_slot_was_heated = history[-1].get("is_heating") if history else True
+        LOGGER.info(
+            "Previous slot heated: %s, Current slot heated: %s",
+            previous_slot_was_heated,
+            is_heating_slot,
+        )
+        if not previous_slot_was_heated and is_heating_slot:
+            LOGGER.info(
+                "Heating starts in the current slot. "
+                + "Apply the MAX_TARGET_TEMPERATURE %s°C for the first 15 minutes so "
+                + "that the heat pump will start heating as quickly as possible.",
+                self._settings.max_target_temperature,
+            )
+            return self._settings.max_target_temperature
+        return target_temperature
+
     def execute(self) -> HeatingControlResult:
         now = datetime.now(UTC)
         slot_start, slot_end = self._current_slot_bounds(now)
@@ -651,6 +673,13 @@ class HeatingControlService:
             prices=prices,
             history=history,
         )
+
+        target_temperature = self._apply_heating_start_boost(
+            history=history,
+            is_heating_slot=is_heating_slot,
+            target_temperature=target_temperature,
+        )
+
         do_we_heat = self._apply_heating_control(
             is_summer=is_summer,
             is_heating_slot=is_heating_slot,
@@ -660,6 +689,7 @@ class HeatingControlService:
             indoor_temperature=indoor_temperature,
             outdoor_temperature=outdoor_temperature,
         )
+
         self._persist_heating_history(
             history=history,
             slot_start=slot_start,
